@@ -1,6 +1,6 @@
 
 CC=clang
-CFLAGS=-I. -Wall -g -DDEBUG
+CFLAGS=-I. -Wall -g -DDDEEBBUUGG
 DEPS=
 OBJ=main.o
 
@@ -23,4 +23,5 @@ debug: project1
 viz: run
 	../venv/bin/python3 viz.py
 
-default: project1
+all: project1
+default: all
