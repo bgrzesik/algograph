@@ -4,10 +4,8 @@
 #include <limits.h>
 #include <stdio.h>
 
-#if 0
 #define valloc malloc
 #undef DEBUG
-#endif
 
 #ifdef DEBUG
 FILE *dot_file;
@@ -35,10 +33,10 @@ struct edge {
     struct edge *next_head; 
 };
 
-struct edge_data {
-    int capacity;
-    int cost;
-};
+//struct edge_data {
+//    int capacity;
+//    int cost;
+//};
 
 struct network {
     int vertex_count; 
@@ -49,36 +47,24 @@ struct network {
     vertex_t source; 
     vertex_t sink; 
 
-    struct edge_data *graph; 
+    //struct edge_data *graph; 
     struct edge *edges;
+    struct edge **adj;
+    struct edge **adjrev;
+
+    struct edge **limits;
+    struct edge *limit_sink;
 
     /* iteration */
-    int *flow;
+    //int *flow;
     int *dist;
-    vertex_t *parent;
+    struct edge **parent;
 };
-
-#define fromto(u, v) ((u) * (network->vertex_count) + (v))
-#define getdata(u, v) (network->graph[fromto((u), (v))])
-#define getflow(u, v) (network->flow[fromto((u), (v))])
-
-/* inline */ int
-get_avail_flow(struct network *network, vertex_t tail, vertex_t head)
-{
-    if (getdata(tail, head).capacity != 0) {
-        /* regular */
-        return getdata(tail, head).capacity - getflow(tail, head);
-    } else if (getdata(head, tail).capacity != 0) {
-        /* residual */
-        return getflow(head, tail);
-    }
-    return 0;
-} 
 
 vertex_t
 bellman_ford(struct network *network)
 {
-    memset(network->parent, 0xff, sizeof(vertex_t) * network->vertex_count);
+    memset(network->parent, 0, sizeof(struct edge *) * network->vertex_count);
     memset(network->dist, 0x7f, sizeof(int) * network->vertex_count);
 
     network->dist[network->sink] = 0;
@@ -89,21 +75,22 @@ bellman_ford(struct network *network)
 
         for (int e = 0; e < network->edge_count; e++) {
             struct edge *edge = &network->edges[e];
-            int cost = getdata(edge->tail, edge->head).cost;
-            
-            bool can = get_avail_flow(network, edge->tail, edge->head) != 0;
-            int d = network->dist[edge->tail] + cost;
+
+            bool can = (edge->capacity - edge->flow) > 0;
+
+            int d = network->dist[edge->tail] + edge->cost;
             if (network->dist[edge->head] > d && can) {
                 network->dist[edge->head] = d;
-                network->parent[edge->head] = edge->tail;
+                network->parent[edge->head] = edge;
                 relaxed = edge->head;
             }
 
-            can = get_avail_flow(network, edge->head, edge->tail) != 0;
-            d = network->dist[edge->head] - cost;
+            can = edge->flow > 0;
+            d = network->dist[edge->head] - edge->cost;
             if (network->dist[edge->tail] > d && can) {
                 network->dist[edge->tail] = d;
-                network->parent[edge->tail] = edge->head;
+                network->parent[edge->tail] = edge;
+
                 relaxed = edge->tail;
             }
             
@@ -118,86 +105,117 @@ cancel_negative_cycles(struct network *network)
 {
     vertex_t cycle_start;
     while ((cycle_start = bellman_ford(network)) != -1) {
+        dprintf("YES WE CAN!!!\n");
+
         for (int i = 0; i < network->vertex_count; i++) {
-            cycle_start = network->parent[cycle_start];
+            struct edge *edge = network->parent[cycle_start];
+            cycle_start = edge->head == cycle_start ?
+                edge->tail : edge->head;
         }
+
+        dprintf("\n");
 
         vertex_t vertex = cycle_start;
         int flow = INT_MAX;
 
         do {
-            vertex_t tail = network->parent[vertex];
-            vertex_t head = vertex;
+            struct edge *edge = network->parent[vertex];
 
-            flow = min(flow, get_avail_flow(network, tail, head));
+            int avail = (vertex == edge->head) ? 
+                edge->capacity - edge->flow : edge->flow;
 
-            vertex = network->parent[vertex];
+            flow = min(flow, avail);
+
+            vertex = vertex == edge->head ? 
+                edge->tail : edge->head;
+
         } while (vertex != cycle_start);
+
+
+        dprintf("flow = %d\n", flow);
 
         vertex = cycle_start;
         do {
-            vertex_t tail = network->parent[vertex];
-            vertex_t head = vertex;
+            struct edge *edge = network->parent[vertex];
 
-            if (getdata(tail, head).capacity != 0) {
-                /* regular */
-                getflow(tail, head) += flow;
-                network->total_cost += flow * getdata(tail, head).cost;
-            } else if (getdata(head, tail).capacity != 0) {
-                /* residual */
-                getflow(head, tail) -= flow;
-                network->total_cost -= flow * getdata(head, tail).cost;
-            }
-            
-            vertex = network->parent[vertex];
+            int sgn = vertex == edge->tail ? -1 : 1;
+
+            edge->flow += sgn * flow;
+            network->total_cost += sgn * flow * edge->cost;
+
+            vertex = vertex == edge->head ? 
+                edge->tail : edge->head;
         } while (vertex != cycle_start);
     }
 }
 
+
 void 
 pour_flow(struct network *network)
 {
-    vertex_t head = network->sink;
-    int flow = network->dist[head];
+    vertex_t head_vertex = network->sink;
+    int flow = network->dist[head_vertex];
 
-    while (head != -1 && head != network->source) {
-        vertex_t tail = network->parent[head];
+    while (head_vertex != network->source) {
+        struct edge *edge = network->parent[head_vertex];
 
-        if (getdata(tail, head).capacity != 0) {
-            /* regular */
-            getflow(tail, head) += flow;
-            network->total_cost += flow * getdata(tail, head).cost;
-        } else if (getdata(head, tail).capacity != 0) {
-            /* residual */
-            getflow(head, tail) -= flow;
-            network->total_cost -= flow * getdata(head, tail).cost;
-        }
-        
+        vertex_t neighbor = edge->head == head_vertex ? edge->tail : edge->head;
+        int sgn = neighbor == edge->head ? -1 : 1;
 
-        head = tail;
+        edge->flow += sgn * flow;
+        network->total_cost += sgn * flow * edge->cost;
+
+
+        head_vertex = neighbor;
     }
+}
+
+void maxflow_dfs(struct network *network, vertex_t vertex);
+
+void 
+maxflow_dfs_iter(struct network *network, vertex_t vertex, struct edge *edge)
+{
+    if (edge->tail != vertex && edge->head != vertex) {
+        exit(-1);
+    }
+
+    vertex_t neighbor = edge->tail == vertex ? edge->head : edge->tail;
+
+    if (network->parent[neighbor] != NULL) {
+        return;
+    }
+
+    int avail = (neighbor == edge->head) ? 
+        edge->capacity - edge->flow : edge->flow;
+
+    if (avail == 0) {
+        return;
+    }
+
+    network->dist[neighbor] = min(avail, network->dist[vertex]);
+    network->parent[neighbor] = edge;
+
+    maxflow_dfs(network, neighbor);
+
 }
 
 void
 maxflow_dfs(struct network *network, vertex_t vertex)
 {
-    for (vertex_t neighbor = 0; neighbor < network->vertex_count; neighbor++) {
-        if (network->parent[neighbor] != -1) {
-            continue;
+    for (struct edge *edge = network->adj[vertex]; edge != NULL;
+            edge = edge->next_tail) {
+        maxflow_dfs_iter(network, vertex, edge);
+
+        if (network->parent[network->sink] != NULL) {
+            return;
         }
+    }
 
-        int avail = get_avail_flow(network, vertex, neighbor);
+    for (struct edge *edge = network->adjrev[vertex]; edge != NULL;
+            edge = edge->next_head) {
+        maxflow_dfs_iter(network, vertex, edge);
 
-        if (avail == 0) {
-            continue;
-        }
-
-        network->dist[neighbor] = min(avail, network->dist[vertex]);
-        network->parent[neighbor] = vertex;
-        
-        maxflow_dfs(network, neighbor);
-
-        if (network->parent[network->sink] != -1) {
+        if (network->parent[network->sink] != NULL) {
             return;
         }
     }
@@ -207,18 +225,26 @@ void
 maxflow(struct network *network)
 {
 
-    int edges = network->vertex_count * network->vertex_count;
-    memset(network->flow, 0, sizeof(int) * edges);
     network->total_cost = 0;
 
+    for (int e = 0; e < network->edge_count; e++) {
+        network->edges[e].flow = 0;
+    }
+
+    int i = 5;
     do {
-        memset(network->parent, 0xff, sizeof(vertex_t) * network->vertex_count);
+        memset(network->parent, 0, sizeof(struct edge *) * network->vertex_count);
         memset(network->dist, 0x7f, sizeof(int) * network->vertex_count);
 
-        network->parent[network->source] = network->source;
         maxflow_dfs(network, network->source);
-        pour_flow(network);
-    } while (network->parent[network->sink] != -1);
+        if (network->parent[network->sink] != NULL) {
+            pour_flow(network);
+        }
+
+        if (i == 0)
+            return;
+        i--; 
+    } while (network->parent[network->sink] != NULL);
 }
 
 #undef getflow
@@ -235,6 +261,27 @@ mincost(struct network *network)
     dprintf("post cost = %d\n", network->total_cost);
 }
 
+void 
+add_edge(struct network *network, struct edge **cursor,
+         vertex_t tail, vertex_t head,
+         int capacity, int cost)
+{
+    (*cursor)++;
+    (*cursor)->tail = tail;
+    (*cursor)->head = head;
+
+    (*cursor)->flow = 0;
+
+    (*cursor)->cost = cost;
+    (*cursor)->capacity = capacity;
+
+    (*cursor)->next_tail = network->adj[tail];
+    (*cursor)->next_head = network->adjrev[head];
+
+
+    network->adj[tail] = *cursor;
+    network->adjrev[head]= *cursor;
+}
 
 bool
 solve_tournament()
@@ -242,32 +289,38 @@ solve_tournament()
     int player_count, budget;
     fscanf(stdin, "%d %d", &budget, &player_count);
 
+    if (player_count <= 1) {
+        return true;
+    }
+
     int game_count = ((player_count * (player_count - 1)) / 2);
-    int game_offset = 0;
+    int game_offset = 1;
     int player_offset = game_offset + game_count;
 
     struct network network;
     network.vertex_count = game_count + player_count + 3;
     network.edge_count = game_count * 3 + player_count + 1;
 
-    int edges = network.vertex_count * network.vertex_count;
-
     /* alloc once ? */ 
-    network.graph = valloc(sizeof(struct edge_data) * edges);
     network.edges = valloc(sizeof(struct edge) * network.edge_count);
-    network.flow = valloc(sizeof(int) * edges);
+    network.limits = valloc(sizeof(struct edge *) * player_count);
+
+    network.adj = valloc(sizeof(struct edge *) * network.vertex_count);
+    network.adjrev = valloc(sizeof(struct edge *) * network.vertex_count);
+    memset(network.adj, 0, (sizeof(struct edge *) * network.vertex_count));
+    memset(network.adjrev, 0, (sizeof(struct edge *) * network.vertex_count));
 
     network.dist = valloc(sizeof(int) * network.vertex_count);
     network.parent = valloc(sizeof(vertex_t) * network.vertex_count);
 
-    memset(network.graph, 0, sizeof(struct edge_data) * edges);
+    network.adjrev = valloc(sizeof(struct edge *) * network.vertex_count);
 
-#define fromto(u, v) ((u) * (network.vertex_count) + (v))
-#define getdata(u, v) (network.graph[fromto((u), (v))])
+    network.dist = valloc(sizeof(int) * network.vertex_count);
+    network.parent = valloc(sizeof(vertex_t) * network.vertex_count);
 
-    vertex_t limit_vertex = game_count + player_count;
-    vertex_t source_vertex = game_count + player_count + 1;
-    vertex_t sink_vertex = game_count + player_count + 2;
+    vertex_t source_vertex = 0;
+    vertex_t limit_vertex = player_offset + player_count;
+    vertex_t sink_vertex = player_offset + player_count + 1;
 
     network.sink = sink_vertex;
     network.source = source_vertex;
@@ -297,14 +350,14 @@ solve_tournament()
         vertex_t loser_vertex = player_offset + loser;
 
 
-        *(++edge_i) = (struct edge) { source_vertex, game_vertex };
-        getdata(source_vertex, game_vertex) = (struct edge_data) { 1, 0 };
-        
-        *(++edge_i) = (struct edge) { game_vertex, winner_vertex };
-        getdata(game_vertex, winner_vertex) = (struct edge_data) { 1, 0 };
+        add_edge(&network, &edge_i,
+                 source_vertex, game_vertex, 1, 0);
 
-        *(++edge_i) = (struct edge) { game_vertex, loser_vertex };
-        getdata(game_vertex, loser_vertex) = (struct edge_data) { 1, bribe };
+        add_edge(&network, &edge_i,
+                 game_vertex, winner_vertex, 1, 0);
+
+        add_edge(&network, &edge_i,
+                 game_vertex, loser_vertex, 1, bribe);
 
 
         dotdebug("\t%d [label=\"%d vs %d\"];\n",
@@ -316,37 +369,34 @@ solve_tournament()
 
         dotdebug("\t%d [label=p%d]\n", player_vertex, player_idx);
 
-        if (player_idx == 0) {
-            *(++edge_i) = (struct edge) { player_vertex, sink_vertex };
-            getdata(player_vertex, limit_vertex).cost = 0;
+        vertex_t head = player_idx == 0 ? sink_vertex : limit_vertex;
+        add_edge(&network, &edge_i,
+                 player_vertex, head, 1, 0);
 
-        } else {
-            *(++edge_i) = (struct edge) { player_vertex, limit_vertex };
-            getdata(player_vertex, limit_vertex).cost = 0;
-        }        
+        network.limits[player_idx] = edge_i;
     }
 
-    player_vertex = player_offset + 0;
-   // *(++edge_i) = (struct edge) { player_vertex, sink_vertex };
-    *(++edge_i) = (struct edge) { limit_vertex, sink_vertex };
+    add_edge(&network, &edge_i,
+             limit_vertex, sink_vertex, 1, 0);
 
+    network.limit_sink = edge_i;
 
     dprintf("budget = %d\n", budget);
     bool found = false;
     for (int limit = player_count / 2; limit <= player_count - 1; limit++) {
+        dprintf("\n");
         dprintf("limit = %d\n", limit);
 
         player_vertex = player_offset + 0;
-        getdata(player_vertex, sink_vertex) = (struct edge_data) {limit, 0};
-        getdata(limit_vertex, sink_vertex) = (struct edge_data) {game_count - limit, 0};
 
-        for (int player_idx = 1; player_idx < player_count; player_idx++) {
-            player_vertex = player_offset + player_idx;
-            getdata(player_vertex, limit_vertex).capacity = limit;
+        for (int player_idx = 0; player_idx < player_count; player_idx++) {
+            network.limits[player_idx]->capacity = limit;
         }
+        network.limit_sink->capacity = game_count - limit;
 
         mincost(&network);
         dprintf("spent = %d\n", network.total_cost);
+        dprintf("\n");
 
         if (network.total_cost <= budget) {
             found = true;
@@ -355,15 +405,13 @@ solve_tournament()
     }
 
 #ifdef DEBUG
-    for (int v = 0; v < network.vertex_count; v++) {
-        for (int u = 0; u < network.vertex_count; u++) {
-            struct edge_data *edge = &getdata(v, u);
-            if (edge->capacity != 0) {
-                dotdebug("\t%d -> %d [label=\"%d, %d, %d\"];\n", 
-                         v, u, edge->capacity, edge->cost, 
-                         network.flow[fromto(v, u)]);
-            }
-        }
+    for (int e = 0; e < network.edge_count; e++) {
+        struct edge *edge = &network.edges[e];
+
+        dotdebug("\t%d -> %d [label=\"%d, %d, %d\"];\n", 
+                 edge->tail, edge->head, 
+                 edge->capacity, edge->cost, edge->flow);
+
     }
     dotdebug("}\n");
 #endif
@@ -371,12 +419,8 @@ solve_tournament()
 
     free(network.dist);
     free(network.parent);
-    free(network.flow);
     free(network.edges);
-    free(network.graph);
 
-#undef getdata
-#undef fromto
     return found;
 }
 
