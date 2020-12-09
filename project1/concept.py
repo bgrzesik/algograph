@@ -2,6 +2,7 @@ import math
 # from ortools.linear_solver import pywraplp
 from ortools.graph.pywrapgraph import SimpleMinCostFlow
 import pydot
+import imgcat
 
 
 def tournament(player_count, budget, games_data):
@@ -59,13 +60,13 @@ def tournament(player_count, budget, games_data):
         if solver.OptimalCost() > budget:
             return False
 
-        # print(solver.MaximumFlow())
-        # print(solver.OptimalCost())
 
-        print("digraph { // ortools")
-        print("\trankdir=LR;")
-        for i, v in enumerate(indices):
-            print(f'\t{i} [label="{v}"];')
+        #dot = pydot.Dot(rankdir="LR")
+        dot = None
+
+        if dot:
+            for i, v in enumerate(indices):
+                dot.add_node(pydot.Node(i, label=v))
 
         for i in range(solver.NumArcs()):
             tail = solver.Tail(i)
@@ -75,9 +76,15 @@ def tournament(player_count, budget, games_data):
             cost = solver.UnitCost(i)
             flow = solver.Flow(i)
 
-            print(f'\t{tail} -> {head} [label="{capacity}, {cost}, {flow}"]')
+            if dot:
+                dot.add_edge(pydot.Edge(tail, head, 
+                                        label=f"{capacity}, {cost}, {flow}"))
 
-        print("}")
+        if dot:
+            if not game_count > 50:
+                imgcat.imgcat(dot.create_png())
+            elif not game_count > 200:
+                dot.write_png(f"{player_count}_big_boy.png")
 
         print("cost = ", solver.OptimalCost())
 
@@ -98,29 +105,19 @@ def parse_data(games_data):
 
 
 if __name__ == "__main__":
-    games_data = [[0, 1, 0, 0],
-                  [1, 2, 2, 5],
-                  [0, 2, 2, 3]]
+    with open("input.txt", "r") as f:
+        game_count = int(f.readline())
 
-    player_count = 3
-    print(tournament(player_count, 5, games_data))
+        for game in range(game_count):
+            budget = int(f.readline())
+            player_count = int(f.readline())
+            game_count = (player_count * (player_count - 1)) // 2
+            data = "".join([f.readline() for _ in range(game_count)])
 
-    games_data = parse_data("""
-        0 1 1 5
-        0 3 0 0
-        0 2 2 14
-        1 2 2 3
-        1 3 1 8
-        2 3 2 1
-    """)
-    print(tournament(4, 10, games_data))
+            if game_count == 0:
+                print(True)
+                continue
 
-    games_data = parse_data("""
-        0 1 1 5
-        0 3 0 0
-        0 2 2 14
-        1 2 2 3
-        1 3 1 8
-        2 3 2 1
-    """)
-    print(tournament(4, 1, games_data))
+            print(tournament(player_count, budget, parse_data(data)))
+
+            

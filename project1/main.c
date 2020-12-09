@@ -4,10 +4,10 @@
 #include <limits.h>
 #include <stdio.h>
 
-#if 1
+#if 0
 #undef DDEEBBUUGG
 #endif
-#define valloc malloc
+//#define valloc malloc
 
 #ifdef DDEEBBUUGG 
 FILE *dot_file;
@@ -44,7 +44,6 @@ struct network {
     vertex_t source; 
     vertex_t sink; 
 
-    //struct edge_data *graph; 
     struct edge *edges;
     struct edge **adj;
     struct edge **adjrev;
@@ -52,8 +51,6 @@ struct network {
     struct edge **limits;
     struct edge *limit_sink;
 
-    /* iteration */
-    //int *flow;
     int *dist;
     struct edge **parent;
 };
@@ -61,9 +58,6 @@ struct network {
 vertex_t
 bellman_ford(struct network *network)
 {
-    memset(network->parent, 0, sizeof(struct edge *) * network->vertex_count);
-    memset(network->dist, 0x7f, sizeof(int) * network->vertex_count);
-
     for (int v = 0; v < network->vertex_count; v++) {
         network->parent[v] = NULL;
         network->dist[v] = INT_MAX;
@@ -103,12 +97,18 @@ bellman_ford(struct network *network)
                 }
             }
         }
+
+        if (relaxed == -1) {
+            break;
+        }
     }
 
+#ifdef DDEEBBUUGG__
     for (int v = 0; v < network->vertex_count; v++) {
         dprintf("%d ", network->dist[v]);
     }
     dprintf("\n");
+#endif
 
     return relaxed;
 }
@@ -124,12 +124,10 @@ cancel_negative_cycles(struct network *network)
                 edge->tail : edge->head;
         }
 
-        dprintf("\n");
-
         vertex_t vertex = cycle_start;
         int flow = INT_MAX;
 
-        do {
+        do { // TODO  get rid of
             struct edge *edge = network->parent[vertex];
 
             int avail = (vertex == edge->head) ? 
@@ -143,7 +141,7 @@ cancel_negative_cycles(struct network *network)
         } while (vertex != cycle_start);
 
 
-        dprintf("flow = %d\n", flow);
+        //dprintf("flow = %d\n", flow);
 
         vertex = cycle_start;
         do {
@@ -183,13 +181,15 @@ pour_flow(struct network *network)
 
 void maxflow_dfs(struct network *network, vertex_t vertex);
 
-void 
+/* inline */ void 
 maxflow_dfs_iter(struct network *network, vertex_t vertex, struct edge *edge)
 {
+#ifdef DDEEBBUUGG
     if (edge->tail != vertex && edge->head != vertex) {
         printf("EEEEEEE\n");
         exit(-1);
     }
+#endif
 
     vertex_t neighbor = edge->tail == vertex ? edge->head : edge->tail;
 
@@ -243,25 +243,19 @@ maxflow(struct network *network)
         network->edges[e].flow = 0;
     }
 
-    int i = 5;
     do {
-        memset(network->parent, 0, sizeof(struct edge *) * network->vertex_count);
-        memset(network->dist, 0x7f, sizeof(int) * network->vertex_count);
+        for (int v = 0; v < network->vertex_count; v++) {
+            network->parent[v] = NULL;
+            network->dist[v] = INT_MAX;
+        }
 
         maxflow_dfs(network, network->source);
         if (network->parent[network->sink] != NULL) {
             pour_flow(network);
         }
 
-        if (i == 0)
-            return;
-        i--; 
     } while (network->parent[network->sink] != NULL);
 }
-
-#undef getflow
-#undef getdata
-#undef fromto
 
 
 void
@@ -325,6 +319,7 @@ solve_tournament()
     network.dist     = valloc(sizeof(int) * network.vertex_count);
     network.parent   = valloc(sizeof(struct edge *) * network.vertex_count);
 
+#ifdef DDEEBBUUGG__
     dprintf("netwo\t = %p\n", &network);
     dprintf("edges\t = %p\n", network.edges);
     dprintf("limi \t = %p\n", network.limits);
@@ -332,10 +327,12 @@ solve_tournament()
     dprintf("adjr \t = %p\n", network.adjrev);
     dprintf("dist \t = %p\n", network.dist);
     dprintf("pare \t = %p\n", network.parent);
+#endif
 
-
-    memset(network.adj,      0, sizeof(struct edge *) * network.vertex_count);
-    memset(network.adjrev,   0, sizeof(struct edge *) * network.vertex_count);
+    for (int v = 0; v < network.vertex_count; v++) {
+        network.adj[v] = NULL;
+        network.adjrev[v] = NULL;
+    }
 
     vertex_t source_vertex = 0;
     vertex_t limit_vertex = player_offset + player_count;
@@ -344,12 +341,14 @@ solve_tournament()
     network.sink = sink_vertex;
     network.source = source_vertex;
 
+#ifdef DDEEBBUUGG
     dotdebug("digraph { //c \n");
     dotdebug("\trankdir=LR;\n");
 
     dotdebug("\t%d [label=source];\n", source_vertex);
     dotdebug("\t%d [label=limit];\n", limit_vertex);
     dotdebug("\t%d [label=sink];\n", sink_vertex);
+#endif
 
     int cursor = 0;
     int player_a, player_b, winner, loser, bribe;
