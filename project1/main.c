@@ -21,8 +21,8 @@ FILE *dot_file;
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
-typedef int64_t vertex_t;
-typedef int64_t unit_t;
+typedef int16_t vertex_t;
+typedef int32_t unit_t;
 
 struct edge {
     vertex_t tail; /* from */
@@ -47,7 +47,7 @@ struct network {
     struct edge **limits;
     struct edge *limit_sink;
 
-    int64_t *dist;
+    unit_t *dist;
     struct edge **parent;
 };
 
@@ -62,17 +62,17 @@ bellman_ford(struct network *network)
     network->dist[network->source] = 0;
 
     vertex_t relaxed;
-    for (vertex_t iter = 0; iter < network->vertex_count - 1; iter++) {
+    for (vertex_t iter = 0; iter < network->vertex_count; iter++) {
         relaxed = -1;
 
         for (int e = 0; e < network->edge_count; e++) {
             struct edge *edge = &network->edges[e];
-            unit_t avail = edge->capacity - edge->flow;
             unit_t dist = network->dist[edge->tail];
             unit_t d = dist + edge->cost;
 
+            bool avail = edge->capacity - edge->flow > 0;
             if (dist != INT_MAX) {
-                if (network->dist[edge->head] > d && avail > 0) {
+                if (network->dist[edge->head] > d && avail) {
                     network->dist[edge->head] = d;
                     network->parent[edge->head] = edge;
 
@@ -80,12 +80,12 @@ bellman_ford(struct network *network)
                 }
             }
 
-            avail = edge->flow;
+            avail = edge->flow > 0;
             dist = network->dist[edge->head];
             d = dist - edge->cost;
 
             if (dist != INT_MAX) {
-                if (network->dist[edge->tail] > d && avail > 0) {
+                if (network->dist[edge->tail] > d && avail) {
                     network->dist[edge->tail] = d;
                     network->parent[edge->tail] = edge;
 
@@ -194,7 +194,7 @@ solve_tournament()
     /* alloc once ? */ 
     network.edges    = valloc(sizeof(struct edge) * network.edge_count);
     network.limits   = valloc(sizeof(struct edge *) * player_count);
-    network.dist     = valloc(sizeof(int64_t) * network.vertex_count);
+    network.dist     = valloc(sizeof(unit_t) * network.vertex_count);
     network.parent   = valloc(sizeof(struct edge *) * network.vertex_count);
 
 #ifdef DDEEBBUUGG__
