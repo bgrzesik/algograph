@@ -20,9 +20,10 @@ FILE *dot_file;
 
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
 
-typedef int16_t vertex_t;
-typedef int32_t unit_t;
+typedef int64_t vertex_t;
+typedef int64_t unit_t;
 
 struct edge {
     vertex_t tail; /* from */
@@ -44,7 +45,8 @@ struct network {
 
     struct edge *edges;
 
-    struct edge **limits;
+    struct edge **source_player;
+    struct edge **player_limit;
     struct edge *limit_sink;
 
     unit_t *dist;
@@ -135,10 +137,6 @@ maxflow(struct network *network)
 
     network->total_cost = 0;
 
-    for (int64_t e = 0; e < network->edge_count; e++) {
-        network->edges[e].flow = 0;
-    }
-
     do {
         for (vertex_t v = 0; v < network->vertex_count; v++) {
             network->parent[v] = NULL;
@@ -182,32 +180,35 @@ solve_tournament()
     }
 
     int64_t game_count = ((player_count * (player_count - 1)) / 2);
-    int64_t game_offset = 1;
-    int64_t player_offset = game_offset + game_count;
+    int64_t max_points = INT_MIN;
+
+    int64_t player_offset_l = 1;
 
     struct network network;
     memset(&network, 0, sizeof(struct network));
 
-    network.vertex_count = game_count + player_count + 3;
-    network.edge_count = game_count * 3 + player_count + 1;
+    network.vertex_count = 1 + player_count + 2;
+    network.edge_count = player_count + game_count + player_count + 1;
 
     /* alloc once ? */ 
-    network.edges    = valloc(sizeof(struct edge) * network.edge_count);
-    network.limits   = valloc(sizeof(struct edge *) * player_count);
-    network.dist     = valloc(sizeof(unit_t) * network.vertex_count);
-    network.parent   = valloc(sizeof(struct edge *) * network.vertex_count);
+    network.edges           = valloc(sizeof(struct edge) * network.edge_count);
+    network.source_player   = valloc(sizeof(struct edge *) * player_count);
+    network.player_limit    = valloc(sizeof(struct edge *) * player_count);
+    network.dist            = valloc(sizeof(unit_t) * network.vertex_count);
+    network.parent          = valloc(sizeof(struct edge *) * network.vertex_count);
 
 #ifdef DDEEBBUUGG__
     dprintf("netwo\t = %p\n", &network);
     dprintf("edges\t = %p\n", network.edges);
-    dprintf("limi \t = %p\n", network.limits);
+    dprintf("srcp \t = %p\n", network.source_player);
+    dprintf("plli \t = %p\n", network.player_limit);
     dprintf("dist \t = %p\n", network.dist);
     dprintf("pare \t = %p\n", network.parent);
 #endif
 
     vertex_t source_vertex = 0;
-    vertex_t limit_vertex = player_offset + player_count;
-    vertex_t sink_vertex = player_offset + player_count + 1;
+    vertex_t limit_vertex = player_offset_l + player_count;
+    vertex_t sink_vertex = player_offset_l + player_count + 1;
 
     network.sink = sink_vertex;
     network.source = source_vertex;
@@ -224,6 +225,21 @@ solve_tournament()
     int64_t cursor = 0;
     int64_t player_a, player_b, winner, loser, bribe;
 
+
+
+    /* limits[i] = source -> player l (tmp) */
+
+    vertex_t player_vertex;
+    for (int64_t player_idx = 0; player_idx < player_count; player_idx++) {
+        player_vertex = player_offset_l + player_idx;
+
+        network.source_player[player_idx] = add_edge(&network, &cursor,
+                source_vertex, player_vertex, 0, 0);
+
+        dotdebug("\t%lld [label=\"%lldl\"];\n",
+                player_vertex, player_idx);
+    }
+
     for (int64_t game_idx = 0; game_idx < game_count; game_idx++) {
         fscanf(stdin, "%lld %lld %lld %lld", 
                &player_a, &player_b, 
@@ -231,33 +247,27 @@ solve_tournament()
         
         loser = winner == player_a ? player_b : player_a;
 
-        vertex_t game_vertex = game_offset + game_idx;
-        vertex_t winner_vertex = player_offset + winner;
-        vertex_t loser_vertex = player_offset + loser;
+        vertex_t winner_vertex = player_offset_l + winner;
+        vertex_t loser_vertex = player_offset_l + loser;
 
-
-        add_edge(&network, &cursor,
-                 source_vertex, game_vertex, 1, 0);
-
-        add_edge(&network, &cursor,
-                 game_vertex, winner_vertex, 1, 0);
+        network.source_player[winner]->capacity += 1;
+        
+        max_points = max(max_points, network.source_player[winner]->capacity);
 
         add_edge(&network, &cursor,
-                 game_vertex, loser_vertex, 1, bribe);
+                 winner_vertex, loser_vertex, 1, bribe);
 
-
-        dotdebug("\t%lld [label=\"%lld vs %lld\"];\n",
-                game_vertex, player_a, player_b);
     }   
 
-    vertex_t player_vertex;
+    /* override tmp */
     for (int64_t player_idx = 0; player_idx < player_count; player_idx++) {
-        player_vertex = player_offset + player_idx;
+        player_vertex = player_offset_l + player_idx;
 
         dotdebug("\t%lld [label=p%lld]\n", player_vertex, player_idx);
 
         vertex_t head = player_idx == 0 ? sink_vertex : limit_vertex;
-        network.limits[player_idx] = add_edge(
+
+        network.player_limit[player_idx] = add_edge(
                 &network, &cursor,
                 player_vertex, head, 1, 0);
 
@@ -266,24 +276,29 @@ solve_tournament()
     network.limit_sink = add_edge(&network, &cursor,
              limit_vertex, sink_vertex, 1, 0);
 
+    bool found = false;
 
     dprintf("budget = %lld\n", budget);
-    bool found = false;
+    dprintf("max_points = %lld\n", max_points);
     dprintf("player_count = %lld\n", player_count);
-    for (int64_t limit = player_count / 2; limit <= player_count - 1; limit++) {
+
+    for (int64_t limit = player_count / 2; limit <= max_points; limit++) {
         dprintf("\n");
         dprintf("limit = %lld\n", limit);
 
-        player_vertex = player_offset + 0;
+        network.limit_sink->flow = 0;
+        network.limit_sink->capacity = game_count - limit;
+
+        for (int64_t e = 0; e < network.edge_count; e++) {
+            network.edges[e].flow = 0;
+        }
 
         for (int player_idx = 0; player_idx < player_count; player_idx++) {
-            network.limits[player_idx]->capacity = limit;
+            network.player_limit[player_idx]->capacity = limit;
         }
-        network.limit_sink->capacity = game_count - limit;
 
         maxflow(&network);
         dprintf("spent = %lld\n", network.total_cost);
-        dprintf("\n");
 
         if (network.total_cost <= budget) {
             found = true;
@@ -305,7 +320,8 @@ solve_tournament()
     free(network.dist);
     free(network.parent);
 
-    free(network.limits);
+    free(network.source_player);
+    free(network.player_limit);
     free(network.edges);
 
     return found;
@@ -322,9 +338,19 @@ main(int argc, const char *argv[])
     fscanf(stdin, "%d", &n);
     for (int i = 0; i < n; i++) {
         if (solve_tournament()) {
-            printf("TAK\n");
+            dprintf("==========================================\n");
+            dprintf("||                  ");
+            printf("TAK");
+            dprintf("                 ||");
+            printf("\n");
+            dprintf("==========================================\n");
         } else {
-            printf("NIE\n");
+            dprintf("==========================================\n");
+            dprintf("||                  ");
+            printf("NIE");
+            dprintf("                 ||");
+            printf("\n");
+            dprintf("==========================================\n");
         }
     }
 
