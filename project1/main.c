@@ -7,7 +7,6 @@
 #if 1
 #undef DDEEBBUUGG
 #endif
-#define valloc malloc
 
 #ifdef DDEEBBUUGG 
 FILE *dot_file;
@@ -49,6 +48,7 @@ struct network {
     struct edge **player_limit;
     struct edge *limit_sink;
 
+    unit_t *avail;
     unit_t *dist;
     struct edge **parent;
 };
@@ -59,6 +59,7 @@ bellman_ford(struct network *network)
     for (vertex_t v = 0; v < network->vertex_count; v++) {
         network->parent[v] = NULL;
         network->dist[v] = INT_MAX;
+        network->avail[v] = INT_MAX;
     }
 
     network->dist[network->source] = 0;
@@ -72,24 +73,26 @@ bellman_ford(struct network *network)
             unit_t dist = network->dist[edge->tail];
             unit_t d = dist + edge->cost;
 
-            bool avail = edge->capacity - edge->flow > 0;
+            unit_t avail = edge->capacity - edge->flow;
             if (dist != INT_MAX) {
-                if (network->dist[edge->head] > d && avail) {
+                if (network->dist[edge->head] > d && avail > 0) {
                     network->dist[edge->head] = d;
                     network->parent[edge->head] = edge;
+                    network->avail[edge->head] = min(avail, network->avail[edge->tail]);
 
                     relaxed = edge->head;
                 }
             }
 
-            avail = edge->flow > 0;
+            avail = edge->flow;
             dist = network->dist[edge->head];
             d = dist - edge->cost;
 
             if (dist != INT_MAX) {
-                if (network->dist[edge->tail] > d && avail) {
+                if (network->dist[edge->tail] > d && avail > 0) {
                     network->dist[edge->tail] = d;
                     network->parent[edge->tail] = edge;
+                    network->avail[edge->tail] = min(avail, network->avail[edge->head]);
 
                     relaxed = edge->tail;
                 }
@@ -115,7 +118,7 @@ void
 pour_flow(struct network *network)
 {
     vertex_t head_vertex = network->sink;
-    const unit_t flow = 1;
+    const unit_t flow = network->avail[network->sink];
 
     while (head_vertex != network->source) {
         struct edge *edge = network->parent[head_vertex];
@@ -195,6 +198,7 @@ solve_tournament()
     network.source_player   = valloc(sizeof(struct edge *) * player_count);
     network.player_limit    = valloc(sizeof(struct edge *) * player_count);
     network.dist            = valloc(sizeof(unit_t) * network.vertex_count);
+    network.avail            = valloc(sizeof(unit_t) * network.vertex_count);
     network.parent          = valloc(sizeof(struct edge *) * network.vertex_count);
 
 #ifdef DDEEBBUUGG__
@@ -224,10 +228,6 @@ solve_tournament()
 
     int64_t cursor = 0;
     int64_t player_a, player_b, winner, loser, bribe;
-
-
-
-    /* limits[i] = source -> player l (tmp) */
 
     vertex_t player_vertex;
     for (int64_t player_idx = 0; player_idx < player_count; player_idx++) {
@@ -259,7 +259,6 @@ solve_tournament()
 
     }   
 
-    /* override tmp */
     for (int64_t player_idx = 0; player_idx < player_count; player_idx++) {
         player_vertex = player_offset_l + player_idx;
 
@@ -317,6 +316,7 @@ solve_tournament()
     }
     dotdebug("}\n");
 #endif
+    free(network.avail);
     free(network.dist);
     free(network.parent);
 
