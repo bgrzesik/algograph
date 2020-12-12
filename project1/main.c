@@ -7,6 +7,7 @@
 #if 1
 #undef DDEEBBUUGG
 #endif
+#define valloc malloc
 
 #ifdef DDEEBBUUGG 
 FILE *dot_file;
@@ -27,7 +28,7 @@ typedef int32_t unit_t;
 
 #define UNIT_MIN 0x80000000
 #define UNIT_MAX 0x7fffffff
-#define ALIGN_TO 32
+#define ALIGN_TO 16
 
 struct edge {
     vertex_t tail; /* from */
