@@ -1,13 +1,9 @@
 
 CC=clang
-CFLAGS=-I. -Wall -g -DDDEEBBUUGG
+CFLAGS=-I. -Wall -g -DDDEEBBUUGG -lprofiler
 DEPS=
-OBJ=main.o
 
-%.o: %.c $(DEPS)
-	$(CC) -c -o $@ $< $(CFLAGS)
-
-project1: $(OBJ)
+project1: main.c
 	$(CC) -o $@ $^ $(CFLAGS)
 
 
@@ -15,9 +11,11 @@ clean:
 	rm $(OBJ) project1
 
 run: project1
-	./project1 < ./input.txt
+	killall project1 || true
+	time ./project1 < ./input.txt
 
 debug: project1
+	killall project1 || true
 	lldb ./project1 --source lldb.txt
 
 viz: run
