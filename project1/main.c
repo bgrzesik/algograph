@@ -40,6 +40,7 @@ struct edge {
 
     struct edge *next_head;
     struct edge *next_tail;
+
 } __attribute__ ((aligned (ALIGN_TO)));
 
 struct vertex {
@@ -49,7 +50,8 @@ struct vertex {
 
     struct edge *adj_head;
     struct edge *adj_tail;
-};
+
+} __attribute__ ((aligned (ALIGN_TO)));
 
 struct vertex_queue {
     vertex_t cursor;
@@ -58,7 +60,8 @@ struct vertex_queue {
     /* TODO uint64_t *in_queue;  */ 
     bool *in_queue;
     vertex_t *queue;
-};
+
+} __attribute__ ((aligned (ALIGN_TO)));
 
 
 struct network {
@@ -66,6 +69,7 @@ struct network {
     vertex_t edge_count;
 
     unit_t total_cost;
+    unit_t total_flow;
 
     vertex_t source; 
     vertex_t sink; 
@@ -130,12 +134,13 @@ vertex_queue_pop(struct network *network)
 static inline void 
 relax(struct network *network, struct edge *edge)
 {
-    unit_t dist = network->vertices[edge->tail].dist;
+    struct vertex *head = &network->vertices[edge->head];
+    struct vertex *tail = &network->vertices[edge->tail];
+
+    unit_t dist = tail->dist;
     unit_t d;
     unit_t avail;
 
-    struct vertex *head = &network->vertices[edge->head];
-    struct vertex *tail = &network->vertices[edge->tail];
 
     if (dist != UNIT_MAX) {
         d = dist + edge->cost;
@@ -150,7 +155,7 @@ relax(struct network *network, struct edge *edge)
         }
     }
 
-    dist = network->vertices[edge->head].dist;
+    dist = head->dist;
     if (dist != UNIT_MAX) {
         d = dist - edge->cost;
         avail = edge->flow;
@@ -213,6 +218,7 @@ pour_flow(struct network *network)
 {
     vertex_t head_vertex = network->sink;
     const unit_t flow = network->vertices[network->sink].avail;
+    network->total_flow += flow;
 
     while (head_vertex != network->source) {
         struct edge *edge = network->vertices[head_vertex].parent;
@@ -221,8 +227,8 @@ pour_flow(struct network *network)
         int sgn = neighbor == edge->head ? -1 : 1;
 
         edge->flow += sgn * flow;
-        network->total_cost += sgn * flow * edge->cost;
 
+        network->total_cost += sgn * flow * edge->cost;
 
         head_vertex = neighbor;
     }
@@ -231,7 +237,6 @@ pour_flow(struct network *network)
 void 
 maxflow(struct network *network)
 {
-    network->total_cost = 0;
     do {
         bellman_ford(network);
         if (network->vertices[network->sink].parent != NULL) {
@@ -265,7 +270,7 @@ add_edge(struct network *network, vertex_t *cursor,
     return edge;
 }
 
-bool
+static bool
 solve_tournament()
 {
     player_idx_t player_count;
@@ -341,6 +346,7 @@ solve_tournament()
                 player_vertex, player_idx);
     }
 
+
     for (vertex_t game_idx = 0; game_idx < game_count; game_idx++) {
         fscanf(stdin, "%d %d %d %d", 
                &player_a, &player_b, 
@@ -354,6 +360,10 @@ solve_tournament()
         network.source_player[winner]->capacity += 1;
         
         max_points = max(max_points, network.source_player[winner]->capacity);
+
+        if (bribe > budget) {
+            continue;
+        }
 
         add_edge(&network, &cursor,
                  winner_vertex, loser_vertex, 1, bribe);
@@ -382,10 +392,15 @@ solve_tournament()
     dprintf("max_points = %lld\n", max_points);
     dprintf("player_count = %lld\n", player_count);
 
+    dprintf("======== %d %d\n", cursor, network.edge_count);
+    network.edge_count = cursor;
+
     for (unit_t limit = player_count / 2; limit <= max_points; limit++) {
         dprintf("\n");
         dprintf("limit = %lld\n", limit);
 
+        network.total_cost = 0;
+        network.total_flow = 0;
         network.limit_sink->flow = 0;
         network.limit_sink->capacity = game_count - limit;
 
@@ -407,12 +422,15 @@ solve_tournament()
             network.player_limit[player_idx]->flow = flow;
             
             network.player_limit[player_idx]->capacity = limit;
+
+            network.total_flow += flow;
         }
 
         maxflow(&network);
         dprintf("spent = %lld\n", network.total_cost);
+        dprintf("total_flow = %d %d\n", network.total_flow, game_count);
 
-        if (network.total_cost <= budget) {
+        if (network.total_cost <= budget && network.total_flow == game_count) {
             found = true;
             break;
         }
