@@ -29,12 +29,12 @@ FILE *dot_file;
 
 #define UNIT_MIN 0x80000000
 #define UNIT_MAX 0x7fffffff
-#define ALIGN_TO 16
+#define ALIGN_TO 1
 
 typedef uint64_t vertex_t;
 
 
-typedef uint32_t bitmask_t;
+typedef uint64_t bitmask_t;
 #define BITMASK_BITS (sizeof(bitmask_t) * 8)
 
 #define BITMASK_SET(bitmask, bit) \
@@ -46,7 +46,13 @@ typedef uint32_t bitmask_t;
 
 
 struct vertex {
-    bitmask_t *adj_mask;
+    vertex_t order;
+
+    /*bitmask_t *adj_mask;*/
+
+    vertex_t *adj_list;
+    size_t adj_list_cap;
+    size_t adj_list_size;
 
 } __attribute__ ((aligned (ALIGN_TO)));
 
@@ -72,9 +78,7 @@ struct context {
 
     struct set_node       *set_list;
 
-    vertex_t              *order;
-    uint64_t              *max_len;
-
+    /*vertex_t              *order;*/
 } __attribute__ ((aligned (ALIGN_TO)));
 
 void
@@ -109,10 +113,31 @@ print_list(struct set_node *node)
 #endif
 }
 
+static inline void
+add_adj(struct vertex *vertex, vertex_t b)
+{
+    if (vertex->adj_list_size + 1 >= vertex->adj_list_cap) {
+        vertex->adj_list_cap *= 2;
+        vertex->adj_list = realloc(vertex->adj_list, 
+                vertex->adj_list_cap * sizeof(vertex_t));
+    }
+    vertex->adj_list[vertex->adj_list_size] = b;
+    vertex->adj_list_size++;
+}
+
 bool
 is_adj(struct context *ctx, vertex_t a, vertex_t b) 
 {
-    return BITMASK_HAS(ctx->vertices[a].adj_mask, b);
+    struct vertex *vertex = &ctx->vertices[a];
+
+    for (vertex_t i = 0; i <= vertex->adj_list_size; i++) {
+        if (vertex->adj_list[i] == b) {
+            return true;
+        }
+    }
+    return false;
+
+    /*return BITMASK_HAS(ctx->vertices[a].adj_mask, b);*/
 }
 
 
@@ -218,22 +243,32 @@ max_clique(struct context *ctx)
     uint64_t index = 0;
     uint64_t max_len = 1;
 
-    ctx->order[index++] = node->vertex_idx;
+
+    ctx->vertices[node->vertex_idx].order = index;
+    /*ctx->order[index] = node->vertex_idx;*/
+    index++;
+
     lex_bfs_next(ctx, &node);
 
     while (node != NULL) {
-        ctx->order[index++] = node->vertex_idx;
+        struct vertex *vertex = &ctx->vertices[node->vertex_idx];
+        vertex->order = index;
+        /*ctx->order[index] = node->vertex_idx;*/
+        index++;
         
         uint64_t len = 1;
-        for (int i = index - 1; i >= 0; i--) {
+        /*for (int i = index - 1; i >= 0; i--) {
             if (is_adj(ctx, node->vertex_idx, ctx->order[i])) {
-                //ctx->max_len[node->vertex_idx] = ctx->max_len[ctx->order[i]] + 1;
-                //break;
+                len++;
+            }
+        }*/
+
+        for (int i = 0; i < vertex->adj_list_size; i++) {
+            if (ctx->vertices[vertex->adj_list[i]].order < index) {
                 len++;
             }
         }
 
-        //max_len = max(max_len, ctx->max_len[node->vertex_idx]);
         max_len = max(max_len, len);
 
         lex_bfs_next(ctx, &node);
@@ -262,12 +297,11 @@ solve_game(void)
     size_t vertices_size  = ctx.vertex_count                  * sizeof(struct vertex);
     size_t edges_size     = ctx.edge_count                    * sizeof(struct edge);
     size_t set_list_size  = ctx.vertex_count                  * sizeof(struct set_node);
-    size_t bitmask_size   = (ctx.vertex_count * ctx.mask_len) * sizeof(bitmask_t);
-    size_t order_size     = ctx.vertex_count                  * sizeof(vertex_t);
-    size_t max_len_size   = ctx.vertex_count                  * sizeof(uint64_t);
+    /*size_t bitmask_size   = (ctx.vertex_count * ctx.mask_len) * sizeof(bitmask_t);
+    size_t order_size     = ctx.vertex_count                  * sizeof(vertex_t); */
 
     uint8_t *big_sector = valloc(
-            vertices_size + edges_size + set_list_size + bitmask_size + order_size + max_len_size);
+            vertices_size + edges_size + set_list_size/* + bitmask_size + order_size */);
 
     size_t offset = 0;
 
@@ -280,21 +314,26 @@ solve_game(void)
     ctx.set_list = (struct set_node *) &big_sector[offset];
     offset += set_list_size;
 
+    /*
     bitmask_t *bitmasks = (bitmask_t *) &big_sector[offset];
     offset += bitmask_size;
 
     ctx.order = (vertex_t *) &big_sector[offset];
     offset += order_size;
-
-    ctx.max_len = (uint64_t *) &big_sector[offset];
+    */
 
     for (vertex_t i = 0; i < ctx.vertex_count; i++) {
         struct vertex *vertex = &ctx.vertices[i];
 
-        vertex->adj_mask = &bitmasks[ctx.mask_len * i];
+        vertex->order = UINT_MAX;
+        vertex->adj_list_cap = 64;
+        vertex->adj_list = malloc(vertex->adj_list_cap * sizeof(vertex_t));
+        vertex->adj_list_size = 0;
+
+        /*vertex->adj_mask = &bitmasks[ctx.mask_len * i];
         for (uint64_t m = 0; m < ctx.mask_len; m++) {
             vertex->adj_mask[m] = 0;
-        }
+        }*/
 
 
         struct set_node *node = &ctx.set_list[i];    
@@ -308,8 +347,7 @@ solve_game(void)
             node->set_ends = true;
         }
 
-        ctx.order[i] = UINT_MAX;
-        ctx.max_len[i] = 1;
+        /*ctx.order[i] = UINT_MAX;*/
     }
 
     for (vertex_t i = 0; i < ctx.edge_count; i++) {
@@ -320,11 +358,21 @@ solve_game(void)
         edge->a--;
         edge->b--;
 
-        BITMASK_SET(ctx.vertices[edge->a].adj_mask, edge->b);
-        BITMASK_SET(ctx.vertices[edge->b].adj_mask, edge->a);
+        struct vertex *vertex_a = &ctx.vertices[edge->a];
+        struct vertex *vertex_b = &ctx.vertices[edge->b];
+
+        /*BITMASK_SET(vertex_a->adj_mask, edge->b);*/
+        add_adj(vertex_a, edge->b);
+
+        /*BITMASK_SET(vertex_b->adj_mask, edge->a);*/
+        add_adj(vertex_b, edge->a);
     }
 
     uint64_t solution = max_clique(&ctx) - 1;
+
+    for (vertex_t i = 0; i < ctx.vertex_count; i++) {
+        free(ctx.vertices[i].adj_list);
+    }
 
     free(big_sector);
 
